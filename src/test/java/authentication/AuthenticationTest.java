@@ -2,6 +2,7 @@ package authentication;
 
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
+import com.amazonaws.services.lambda.runtime.events.APIGatewayProxyRequestEvent;
 import com.auth0.jwt.JWT;
 import com.auth0.jwt.algorithms.Algorithm;
 import org.junit.Assert;
@@ -64,8 +65,9 @@ public class AuthenticationTest {
     @Test(expected = RuntimeException.class)
     public void errorParsingJwk() {
         Authentication authentication = new Authentication();
-        Assert.assertNull(authentication.constructPublicKey("1234", setupContext().getLogger()));
+        Assert.assertNull(authentication.constructPublicKey(new HashMap<>(), "1234", setupContext().getLogger()));
     }
+
 
     @Ignore
     @Test(expected = RuntimeException.class)
@@ -77,8 +79,13 @@ public class AuthenticationTest {
     @Test(expected = RuntimeException.class)
     public void errorVerifyingJWT() {
         Authentication authentication = new Authentication();
-        Event event = new Event(TOKEN_WITH_KID);
-        authentication.handleRequest(event, setupContext());
+        authentication.handleRequest(createProxyRequest(TOKEN_WITH_KID), setupContext());
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void errorGettingAuthorizationHeader() {
+        Authentication authentication = new Authentication();
+        authentication.getAuthorizationHeader(Mockito.mock(APIGatewayProxyRequestEvent.class), setupContext().getLogger());
     }
 
     // This test may not be valid because for the test to pass we need to generate a JWT with no expiration (so it passes claim verification) and there is a corresponding
@@ -87,8 +94,7 @@ public class AuthenticationTest {
     @Ignore
     public void validateJwt() {
         Authentication authentication = new Authentication();
-        Event event = new Event(generateJwt());
-        authentication.handleRequest(event, setupContext());
+        authentication.handleRequest(createProxyRequest(generateJwt()), setupContext());
     }
 
     private String generateJwt() {
@@ -112,7 +118,14 @@ public class AuthenticationTest {
 
     private String executeGetKid(String token) {
         Authentication authentication = new Authentication();
-        Context context = setupContext();
         return authentication.getKid(token, setupContext().getLogger());
+    }
+
+    private APIGatewayProxyRequestEvent createProxyRequest(String token) {
+        APIGatewayProxyRequestEvent request = new APIGatewayProxyRequestEvent();
+        Map<String, String> headers = new HashMap<>();
+        headers.put("Authorization", token);
+        request.setHeaders(headers);
+        return request;
     }
 }
