@@ -1,12 +1,15 @@
 package authentication.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonSetter;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonPOJOBuilder;
 
 import java.util.Map;
 
 @JsonDeserialize(builder = AuthorizerResponse.Builder.class)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class AuthorizerResponse {
 
     @JsonProperty("principalId")
@@ -57,6 +60,7 @@ public class AuthorizerResponse {
             this.policyDocument = policyDocument;
             return this;
         }
+
 
         public Builder context(Map<String, String> context) {
             this.context = context;

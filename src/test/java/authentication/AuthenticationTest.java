@@ -41,7 +41,13 @@ public class AuthenticationTest {
             "0bAecBgmpdgXMguEIcoqPJ1n3pIWk_dUZegpqx0Lka21H6XxUTxiy8OcaarA8zdnPUnV6AmNP3ecFawIFYdvJB_cm-GvpCSbr8G8y_Mllj8f" +
             "4x9nBH8pQux89_6gUY618iYv7tuPWBFfEbLxtF2pZS6YC1aSfLQxeNe8djT9YjpvRZA";
 
-    private static final String BASIC_AUTH_ENCODED = "Basic dXNlcm5hbWU6cGFzc3dvcmQ=";
+    // Basic Auth header passed in
+    private static final String BASIC_AUTH_ENCODED = "Basic YWRtaW46cGFzc3dvcmQ=";
+    // API Id used for dummy domain name for API Gateway
+    private static final String API_ID = "1mp6vmezwk";
+    private static final String STAGE = "testing";
+    private static final String AUTH_TOKEN_ENDPOINT = "auth/token";
+    private static final String ORDER_ENDPOINT = "order";
 
     private Context setupContext() {
         Context context = Mockito.mock(Context.class);
@@ -71,13 +77,6 @@ public class AuthenticationTest {
         Assert.assertNull(authentication.constructPublicKey(new HashMap<>(), "1234", setupContext().getLogger()));
     }
 
-
-    @Ignore
-    @Test(expected = RuntimeException.class)
-    public void errorJwkUrl() {
-        // need to parameterize JWK URL
-    }
-
     // Claim should be expired since JWT is old
     @Test(expected = RuntimeException.class)
     public void errorVerifyingJWT() {
@@ -88,98 +87,133 @@ public class AuthenticationTest {
     @Test(expected = RuntimeException.class)
     public void errorNullAuthorizationHeader() {
         Authentication authentication = new Authentication();
-        authentication.findAuthorizationMethod(Mockito.mock(APIGatewayProxyRequestEvent.class), createAuthorizationHeader(null, ""), setupContext().getLogger());
+        APIGatewayProxyRequestEvent request = Mockito.mock(APIGatewayProxyRequestEvent.class);
+        when(request.getHeaders()).thenReturn(createAuthorizationHeader("Authorization", null));
+        authentication.findAuthorizationMethod(request, setupContext().getLogger());
     }
 
     @Test(expected = RuntimeException.class)
     public void errorNonBearerOrBasicAuthorizationHeader() {
         Authentication authentication = new Authentication();
-        authentication.findAuthorizationMethod(Mockito.mock(APIGatewayProxyRequestEvent.class), createAuthorizationHeader("adsf", ""), setupContext().getLogger());
+        APIGatewayProxyRequestEvent request = Mockito.mock(APIGatewayProxyRequestEvent.class);
+        when(request.getHeaders()).thenReturn(createAuthorizationHeader("asdf", ""));
+        authentication.findAuthorizationMethod(Mockito.mock(APIGatewayProxyRequestEvent.class), setupContext().getLogger());
     }
 
+    // TODO: fix ignore, just getting api id from proxy request
     @Test
     public void basicAuthorizationHeaderPassedIn() {
         Authentication authentication = new Authentication();
-        APIGatewayProxyRequestEvent request = mockApiGatewayRequestEvent(BASIC_AUTH_ENCODED);
-        AuthorizerResponse response = authentication.findAuthorizationMethod(request, setupRequestParams(), setupContext().getLogger());
-        assertApiPolicy(response, createContext(), "auth/token");
+        APIGatewayProxyRequestEvent request = mockOrderApiGatewayRequestEvent(BASIC_AUTH_ENCODED, "/" + STAGE + "/" + AUTH_TOKEN_ENDPOINT);
+        AuthorizerResponse response = authentication.findAuthorizationMethod(request, setupContext().getLogger());
+        assertApiPolicy(response, createContext(), "Allow", AUTH_TOKEN_ENDPOINT);
     }
 
-    // TODO: JWT authorization needs a JWT with a KID and no expiration date to write properly
+    // TODO: JWT authorization needs a JWT with a KID and no expiration date to write properly.
     @Test
-    @Ignore
-    public void jwtAuthorizationHeaderPassedIn() {
+//    @Ignore
+    public void jwtExpiredAuthorizationHeaderPassedIn() {
         Authentication authentication = new Authentication();
         String authorizationValue = "Bearer " + TOKEN_WITH_KID;
-        APIGatewayProxyRequestEvent request = mockApiGatewayRequestEvent(authorizationValue);
-        AuthorizerResponse response = authentication.findAuthorizationMethod(request, setupRequestParams(), setupContext().getLogger());
-        assertApiPolicy(response, null, null);
+        APIGatewayProxyRequestEvent request = mockOrderApiGatewayRequestEvent(authorizationValue,"/" + STAGE + "/" + ORDER_ENDPOINT);
+        AuthorizerResponse response = authentication.findAuthorizationMethod(request, setupContext().getLogger());
+        assertApiPolicy(response, null, "Deny", ORDER_ENDPOINT);
     }
 
     @Test
     public void basicAuthVerification() {
         Authentication authentication = new Authentication();
         String [] values = authentication.getCredentialsForBasicAuth(BASIC_AUTH_ENCODED);
-        Assert.assertEquals("username", values[0]);
+        Assert.assertEquals("admin", values[0]);
         Assert.assertEquals("password", values[1]);
     }
 
     @Test(expected = RuntimeException.class)
     public void errorInvalidJwtValidation() {
         Authentication authentication = new Authentication();
-        Map<String, String> params = new HashMap<>();
         String authorizationString = "Bearer " + TOKEN_WITH_KID +"1234";
-        authentication.createPolicyFromJwt(Mockito.mock(APIGatewayProxyRequestEvent.class), params, authorizationString, setupContext().getLogger());
+        authentication.createPolicyFromJwt(Mockito.mock(APIGatewayProxyRequestEvent.class), authorizationString, setupContext().getLogger());
     }
 
+    // TODO: fix ignore, just getting api id from proxy request
     @Test
     public void createApiPolicyNullContext() {
         Authentication authentication = new Authentication();
-        APIGatewayProxyRequestEvent request = mockApiGatewayRequestEvent(BASIC_AUTH_ENCODED);
-        String apiId = "test";
-        AuthorizerResponse response = authentication.createApiPolicy(request, "us-east-1", apiId, null);
-        assertApiPolicy(response, null, apiId);
+        APIGatewayProxyRequestEvent request = mockOrderApiGatewayRequestEvent(BASIC_AUTH_ENCODED, "/" + STAGE + "/" + ORDER_ENDPOINT);
+        AuthorizerResponse response = authentication.createApiPolicy(request, "us-east-1", "Allow", null,null, setupContext().getLogger());
+        assertApiPolicy(response, null, "Allow", ORDER_ENDPOINT);
     }
 
-    private Map<String, String> setupRequestParams() {
-        Map<String, String> params = new HashMap<>();
-        params.put("region", "us-east-1");
-        params.put("userPoolId", "us-east-1_ACiMhEjJh");
-        return params;
+    @Test
+    public void getArnNoRegion() {
+        Authentication authentication = new Authentication();
+        String arn = authentication.createArn(null, "1", API_ID, "test", "GET", "order");
+        Assert.assertEquals("arn:aws:execute-api:*:1:" + API_ID + "/test/GET/order", arn);
+    }
+
+    @Test
+    public void getArnNoApiId() {
+        Authentication authentication = new Authentication();
+        String arn = authentication.createArn("us-east-1", "1", null, "test", "GET", "order");
+        Assert.assertEquals("arn:aws:execute-api:us-east-1:1:*/test/GET/order", arn);
+    }
+
+    @Test
+    public void getArnNoStage() {
+        Authentication authentication = new Authentication();
+        String arn = authentication.createArn("us-east-1", "1", API_ID, null, "GET", "order");
+        Assert.assertEquals("arn:aws:execute-api:us-east-1:1:" + API_ID + "/*/GET/order", arn);
     }
 
     private Map<String, String> createContext() {
         Map<String, String> context = new HashMap<>();
-        context.put("username", "username");
+        context.put("userName", "admin");
         context.put("password", "password");
         return context;
     }
 
-    private void assertApiPolicy(AuthorizerResponse response, Map<String, String> context, String apiId) {
+    private void assertApiPolicy(AuthorizerResponse response, Map<String, String> context, String effect, String resourcePath) {
         Assert.assertEquals("123", response.getPrincipalId());
         Assert.assertEquals(context, response.getContext());
         Assert.assertEquals("execute-api:Invoke", response.getPolicyDocument().Statement.get(0).Action);
-        Assert.assertEquals("Allow", response.getPolicyDocument().Statement.get(0).Effect);
-        Assert.assertEquals("arn:aws:execute-api:us-east-1:123:" + apiId + "/testing/GET/*", response.getPolicyDocument().Statement.get(0).Resource);
+        Assert.assertEquals(effect, response.getPolicyDocument().Statement.get(0).Effect);
+        Assert.assertEquals("arn:aws:execute-api:us-east-1:123:" + API_ID + "/testing/GET/" + resourcePath, response.getPolicyDocument().Statement.get(0).Resource);
 
     }
 
-    private APIGatewayProxyRequestEvent mockApiGatewayRequestEvent(String authorizationValue) {
+    /**
+     * Mock an API request to the Order API gateway which has a resource path as:
+     * arn:aws:execute-api:us-east-1:123:auth/token/testing/GET/order
+     * @param authorizationValue
+     * @return
+     */
+    private APIGatewayProxyRequestEvent mockOrderApiGatewayRequestEvent(String authorizationValue, String resourcePath) {
         APIGatewayProxyRequestEvent request = Mockito.mock(APIGatewayProxyRequestEvent.class);
         APIGatewayProxyRequestEvent.ProxyRequestContext proxyRequestContext = Mockito.mock(APIGatewayProxyRequestEvent.ProxyRequestContext.class);
         APIGatewayProxyRequestEvent.RequestIdentity identity = Mockito.mock(APIGatewayProxyRequestEvent.RequestIdentity.class);
+        Map<String, String> stageVariables = new HashMap<>();
+
+        stageVariables.put("region", "us-east-1");
+        stageVariables.put("userPoolId", "poolId");
+        when(request.getStageVariables()).thenReturn(stageVariables);
+
+        Map<String, String> authorizationHeader = new HashMap<>();
+        authorizationHeader.put("Authorization", "Bearer " + TOKEN_WITH_KID);
+        when(request.getHeaders()).thenReturn(authorizationHeader);
+
         when(request.getRequestContext()).thenReturn(proxyRequestContext);
         when(request.getRequestContext().getIdentity()).thenReturn(identity);
-        when(request.getRequestContext().getIdentity().getAccountId()).thenReturn("123");
-        when(request.getRequestContext().getStage()).thenReturn("testing");
+        when(request.getRequestContext().getStage()).thenReturn(STAGE);
         when(request.getRequestContext().getHttpMethod()).thenReturn("GET");
+        when(request.getRequestContext().getPath()).thenReturn(resourcePath);
+        when(request.getRequestContext().getAccountId()).thenReturn("123");
+        when(request.getRequestContext().getApiId()).thenReturn(API_ID);
         when(request.getHeaders()).thenReturn(createAuthorizationHeader("Authorization", authorizationValue));
         return request;
     }
 
 
-    // This test may not be valid because for the test to pass we need to generate a JWT with no expiration (so it passes claim verification) and there is a corresponding
-    // jwt in the JWKs
+    // TODO: JWT authorization needs a JWT with a KID and no expiration date to write properly.
     @Test
     @Ignore
     public void validateJwt() {
